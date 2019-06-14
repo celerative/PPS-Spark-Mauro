@@ -6,10 +6,10 @@ import org.apache.spark.sql._
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.{Pipeline, PipelineModel}
-import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier, LogisticRegression}
+import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier, LogisticRegression, LinearSVC, NaiveBayes}
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
-import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
+import org.apache.spark.ml.evaluation.{ BinaryClassificationEvaluator, MulticlassClassificationEvaluator}
 
 object Main_Titanic {
   def main(args: Array[String]) {
@@ -206,34 +206,74 @@ object Main_Titanic {
       .otherwise(3))
 
     val datasetDFTestIndexE = datasetDFTestAC.withColumn("Embarked",embarkedUDF(datasetDFTestAC.col("Embarked")))
-    val dataTest = datasetDFTestIndexE.withColumn("Fare",when(expr("Fare <= 7.91"),0)
+    val dataTestt = datasetDFTestIndexE.withColumn("Fare",when(expr("Fare <= 7.91"),0)
       .when(expr("Fare > 7.91 and Fare <= 14.454"),1)
       .when(expr("Fare > 14.454 and Fare <= 31"),2)
       .otherwise(3))
 
-    dataTrain.show()
-    dataTest.show()
+    //dataTrain.show()
+    //dataTest.show()
+    val dataTest = dataTestt.drop("PassengerId")
+    //val dataTrain = dataTrainT.drop("Survived")
 
-
+    val Array(trainingData, testData) = dataTrain.randomSplit(Array(0.8, 0.2))
+    //Declaracion de columnas con las caracteristicas a tener en cuenta para entrenar el dataframe
     val featureCols = Array( "Pclass","Sex", "Age", "Fare", "Embarked", "Title", "Alone","Age*Class" )
     val assembler = new VectorAssembler().setInputCols(featureCols).setOutputCol("features")
-    //val df2 = assembler.transform(dataTrain)
+
+    //Declaracion de la feature a entrenar, designandola como label
     val labelIndexer = new StringIndexer().setInputCol("Survived").setOutputCol("label")
-    //val df3 = labelIndexer.transform(df2)
+    //val labelIndexerT= new StringIndexer().setInputCol("Sex").setOutputCol("label").fit(dataTest)
+
+    //Realización de regresión lógica
     val lr = new LogisticRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
     val pipeline = new Pipeline().setStages(Array(assembler, labelIndexer, lr))
-    val model = pipeline.fit(dataTrain)
-
-    val paramGrid = new ParamGridBuilder().build()
-    val crossValidator = new CrossValidator()
-      .setEstimator(pipeline)
-      .setEvaluator(new BinaryClassificationEvaluator)
-      .setEstimatorParamMaps(paramGrid)
-
-    val predictions = model.transform(dataTest)
-
+    val model = pipeline.fit(trainingData)
+    val predictions = model.transform(testData)
     predictions.show()
 
+    val evaluatorLR = new BinaryClassificationEvaluator()
+      .setLabelCol("label")
+      .setRawPredictionCol("rawPrediction")
+      .setMetricName("areaUnderROC")
 
+    val accuracyLR = evaluatorLR.evaluate(predictions)
+
+    println(s"Logistic Reggresion accuracy = $accuracyLR")
+    //Realización de Support Vector Machine
+    val lsvc = new LinearSVC()
+      .setMaxIter(10)
+      .setRegParam(0.1)
+    val pipeLsvc = pipeline.setStages(Array(assembler,labelIndexer,lsvc))
+
+    val lsvcModel = pipeLsvc.fit(trainingData)
+
+    val predict = lsvcModel.transform(testData)
+
+    predict.show()
+
+    val evaluatorLSVC = new BinaryClassificationEvaluator()
+      .setLabelCol("label")
+      .setRawPredictionCol("rawPrediction")
+      .setMetricName("areaUnderROC")
+
+    val accuracyLSVC = evaluatorLSVC.evaluate(predict)
+
+    println(s"Linear SVC = $accuracyLSVC")
+    // Realización de NaiveBayes
+    val nb = new NaiveBayes()
+    val pipeNB = pipeline.setStages(Array(assembler,labelIndexer,nb))
+
+    val nBModel = pipeNB.fit(trainingData)
+
+    val predictNB = nBModel.transform(testData)
+
+    predictNB.show()
+    val evaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol("label")
+      .setPredictionCol("prediction")
+      .setMetricName("accuracy")
+    val accuracy = evaluator.evaluate(predictNB)
+    println(s"Naive Bayes accuracy = $accuracy")
   }
 }
