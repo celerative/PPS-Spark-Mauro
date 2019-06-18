@@ -1,12 +1,13 @@
 //imṕortar librerias para machine learning
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types.{FloatType, IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{FloatType, IntegerType, StringType, StructField, StructType, DoubleType}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql._
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.{Pipeline, PipelineModel}
-import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier, LogisticRegression, LinearSVC, NaiveBayes}
+import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier,
+  LogisticRegression, LinearSVC, NaiveBayes, DecisionTreeClassificationModel, DecisionTreeClassifier, MultilayerPerceptronClassifier}
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.ml.evaluation.{ BinaryClassificationEvaluator, MulticlassClassificationEvaluator}
@@ -240,6 +241,7 @@ object Main_Titanic {
     val accuracyLR = evaluatorLR.evaluate(predictions)
 
     println(s"Logistic Reggresion accuracy = $accuracyLR")
+
     //Realización de Support Vector Machine
     val lsvc = new LinearSVC()
       .setMaxIter(10)
@@ -260,6 +262,7 @@ object Main_Titanic {
     val accuracyLSVC = evaluatorLSVC.evaluate(predict)
 
     println(s"Linear SVC = $accuracyLSVC")
+
     // Realización de NaiveBayes
     val nb = new NaiveBayes()
     val pipeNB = pipeline.setStages(Array(assembler,labelIndexer,nb))
@@ -269,11 +272,98 @@ object Main_Titanic {
     val predictNB = nBModel.transform(testData)
 
     predictNB.show()
-    val evaluator = new MulticlassClassificationEvaluator()
+    val evaluatorNB = new MulticlassClassificationEvaluator()
       .setLabelCol("label")
       .setPredictionCol("prediction")
       .setMetricName("accuracy")
-    val accuracy = evaluator.evaluate(predictNB)
-    println(s"Naive Bayes accuracy = $accuracy")
+    val accuracyNB = evaluatorNB.evaluate(predictNB)
+    println(s"Naive Bayes accuracy = $accuracyNB")
+
+    //Realización de Decision Tree
+    val dt = new DecisionTreeClassifier()
+      .setLabelCol("label")
+      .setFeaturesCol("features")
+
+    val pipeDt = new Pipeline()
+      .setStages(Array(labelIndexer, assembler, dt))
+
+    val modelDt = pipeDt.fit(trainingData)
+
+    val predictDt = modelDt.transform(testData)
+
+    predictDt.show()
+
+    val evaluatorDT = new MulticlassClassificationEvaluator()
+      .setLabelCol("label")
+      .setPredictionCol("prediction")
+      .setMetricName("accuracy")
+    val accuracyDT = evaluatorDT.evaluate(predictDt)
+
+    println(s"Decision Tree accuracy = $accuracyDT")
+    println(s"Test Error = ${(1.0 - accuracyDT)}")
+
+    //Realización de Randomn Forest
+    val rf = new RandomForestClassifier()
+      .setLabelCol("label")
+      .setFeaturesCol("features")
+      .setNumTrees(10)
+
+    val pipeRf = new Pipeline().setStages(Array(labelIndexer, assembler, rf))
+
+    val modelRf = pipeRf.fit(trainingData)
+
+    val predictRf = modelRf.transform(testData)
+
+    predictRf.show()
+
+    val evaluatorRF = new MulticlassClassificationEvaluator()
+      .setLabelCol("label")
+      .setPredictionCol("prediction")
+      .setMetricName("accuracy")
+    val accuracyRF = evaluatorRF.evaluate(predictRf)
+
+    println(s"Randonm Forest accuracy = $accuracyRF")
+
+    //Realización de perceptron, Artificial neural network
+    val layers = Array[Int](8, 5, 4, 2)
+
+    val trainer = new MultilayerPerceptronClassifier()
+      .setLayers(layers)
+      .setBlockSize(128)
+      .setSeed(1234L)
+      .setMaxIter(100)
+
+    val pipeP = new Pipeline().setStages(Array(labelIndexer, assembler, trainer))
+
+    val modelP = pipeP.fit(trainingData)
+
+    val predictP = modelP.transform(testData)
+
+    predictP.show()
+
+    val evaluatorP = new MulticlassClassificationEvaluator()
+      .setMetricName("accuracy")
+
+    val accuracyP = evaluatorP.evaluate(predictP)
+
+    println(s"Perceptron accuracy = $accuracyP")
+
+    val accSchema = StructType(List(
+      StructField("Model", StringType, nullable = true),
+      StructField("Score", DoubleType, nullable = false)
+    )
+    )
+    val accrdd = sqlContext.sparkContext.parallelize(List(
+      Row("Logistic Regression", accuracyLR ),
+      Row("Support Vector Machine" , accuracyLSVC),
+      Row("Naive Bayes" , accuracyNB),
+      Row("Decision Tree" , accuracyDT),
+      Row("Random Forest" , accuracyRF),
+      Row("Perceptron", accuracyP)
+    ))
+
+    val accuracyDf = sqlContext.createDataFrame(accrdd, accSchema)
+
+    accuracyDf.orderBy(desc("Score")).show()
   }
 }
