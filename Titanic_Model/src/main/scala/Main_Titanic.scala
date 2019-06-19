@@ -7,7 +7,8 @@ import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier,
-  LogisticRegression, LinearSVC, NaiveBayes, DecisionTreeClassificationModel, DecisionTreeClassifier, MultilayerPerceptronClassifier}
+  LogisticRegression, LinearSVC, NaiveBayes, DecisionTreeClassificationModel, DecisionTreeClassifier,
+  MultilayerPerceptronClassifier,GBTClassificationModel, GBTClassifier}
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.ml.evaluation.{ BinaryClassificationEvaluator, MulticlassClassificationEvaluator}
@@ -51,9 +52,6 @@ object Main_Titanic {
     datasetDFTest.createOrReplaceTempView("test")
 
 
-    /*datasetDF.show()
-    datasetDF.describe().show()*/
-
     //Las siguientes lineas imprimen en pantalla la relacion de Pclass,Sex,SibSp y Parch con Survived para ver cuantos sobrevivieron de cada uno de los tipos de esas clases
     /*val df_pclass = datasetDF.select("Pclass","Survived").groupBy("Pclass").agg(avg("Survived")).orderBy(desc("avg(Survived)"))
     df_pclass.show()
@@ -87,13 +85,11 @@ object Main_Titanic {
       "Embarked" -> "S"
     )
 
-    val datasetDFfill = datasetDF.na.fill(fillNAMap)//.withColumn("Embarked", embarkedUDF(datasetDF.col("Embarked")))
-    //val Array(trainingData, testData) = filledDF.randomSplit(Array(0.7, 0.3))
+    val datasetDFfill = datasetDF.na.fill(fillNAMap)
     val datasetDFTestfill = datasetDFTest.na.fill(fillNAMap)
 
     val datasetDFdrop = datasetDFfill.drop("Ticket","Cabin","PassengerId")
     val datasetDFTestdrop = datasetDFTestfill.drop("Ticket","Cabin")
-    //afterdropDF.show()
 
     //Funciones para poder sustraer el Titulo de cada persona
     //Mala practica
@@ -103,7 +99,7 @@ object Main_Titanic {
     //regexp_extract devuelve una ocurrencia a la izquierda con la regular expression definida en el segundo argumento
     val datasetDFTitle = datasetDFdrop.withColumn("Title", regexp_extract(col("Name"), "([A-Za-z]+)\\.", 1)).drop("Name")
     val datasetDFTestTitle = datasetDFTestdrop.withColumn("Title", regexp_extract(col("Name"), "([A-Za-z]+)\\.", 1)).drop("Name")
-    //titleDF.show()
+
     //Se muestran los distintos tipos de titulos que hay entre las personas a bordo
     //titleDF.select("Title").distinct().show()
 
@@ -213,9 +209,8 @@ object Main_Titanic {
       .otherwise(3))
 
     //dataTrain.show()
-    //dataTest.show()
-    val dataTest = dataTestt.drop("PassengerId")
-    //val dataTrain = dataTrainT.drop("Survived")
+
+    //val testData = dataTestt.drop("PassengerId").withColumn("Survived", lit(0))
 
     val Array(trainingData, testData) = dataTrain.randomSplit(Array(0.8, 0.2))
     //Declaracion de columnas con las caracteristicas a tener en cuenta para entrenar el dataframe
@@ -228,56 +223,31 @@ object Main_Titanic {
 
     //Realización de regresión lógica
     val lr = new LogisticRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
-    val pipeline = new Pipeline().setStages(Array(assembler, labelIndexer, lr))
-    val model = pipeline.fit(trainingData)
-    val predictions = model.transform(testData)
-    predictions.show()
 
-    val evaluatorLR = new BinaryClassificationEvaluator()
-      .setLabelCol("label")
-      .setRawPredictionCol("rawPrediction")
-      .setMetricName("areaUnderROC")
+    val pipelineLr = new Pipeline().setStages(Array(assembler, labelIndexer, lr))
 
-    val accuracyLR = evaluatorLR.evaluate(predictions)
+    val predictLr = classification(pipelineLr,trainingData,testData)
 
-    println(s"Logistic Reggresion accuracy = $accuracyLR")
+    val accuracyLR = classificationAccuracyBCE(predictLr)
 
     //Realización de Support Vector Machine
     val lsvc = new LinearSVC()
       .setMaxIter(10)
       .setRegParam(0.1)
-    val pipeLsvc = pipeline.setStages(Array(assembler,labelIndexer,lsvc))
 
-    val lsvcModel = pipeLsvc.fit(trainingData)
+    val pipeLsvc = new Pipeline().setStages(Array(assembler,labelIndexer,lsvc))
 
-    val predict = lsvcModel.transform(testData)
+    val predictLsvc = classification(pipeLsvc,trainingData,testData)
 
-    predict.show()
-
-    val evaluatorLSVC = new BinaryClassificationEvaluator()
-      .setLabelCol("label")
-      .setRawPredictionCol("rawPrediction")
-      .setMetricName("areaUnderROC")
-
-    val accuracyLSVC = evaluatorLSVC.evaluate(predict)
-
-    println(s"Linear SVC = $accuracyLSVC")
+    val accuracyLSVC = classificationAccuracyBCE(predictLsvc)
 
     // Realización de NaiveBayes
     val nb = new NaiveBayes()
-    val pipeNB = pipeline.setStages(Array(assembler,labelIndexer,nb))
+    val pipeNB = new Pipeline().setStages(Array(assembler,labelIndexer,nb))
 
-    val nBModel = pipeNB.fit(trainingData)
+    val predictNB = classification(pipeNB,trainingData,testData)
 
-    val predictNB = nBModel.transform(testData)
-
-    predictNB.show()
-    val evaluatorNB = new MulticlassClassificationEvaluator()
-      .setLabelCol("label")
-      .setPredictionCol("prediction")
-      .setMetricName("accuracy")
-    val accuracyNB = evaluatorNB.evaluate(predictNB)
-    println(s"Naive Bayes accuracy = $accuracyNB")
+    val accuracyNB = classificationAccuracyMCE(predictNB)
 
     //Realización de Decision Tree
     val dt = new DecisionTreeClassifier()
@@ -287,20 +257,9 @@ object Main_Titanic {
     val pipeDt = new Pipeline()
       .setStages(Array(labelIndexer, assembler, dt))
 
-    val modelDt = pipeDt.fit(trainingData)
+    val predictDt = classification(pipeDt,trainingData,testData)
 
-    val predictDt = modelDt.transform(testData)
-
-    predictDt.show()
-
-    val evaluatorDT = new MulticlassClassificationEvaluator()
-      .setLabelCol("label")
-      .setPredictionCol("prediction")
-      .setMetricName("accuracy")
-    val accuracyDT = evaluatorDT.evaluate(predictDt)
-
-    println(s"Decision Tree accuracy = $accuracyDT")
-    println(s"Test Error = ${(1.0 - accuracyDT)}")
+    val accuracyDT = classificationAccuracyMCE(predictDt)
 
     //Realización de Randomn Forest
     val rf = new RandomForestClassifier()
@@ -310,19 +269,9 @@ object Main_Titanic {
 
     val pipeRf = new Pipeline().setStages(Array(labelIndexer, assembler, rf))
 
-    val modelRf = pipeRf.fit(trainingData)
+    val predictRf = classification(pipeRf,trainingData,testData)
 
-    val predictRf = modelRf.transform(testData)
-
-    predictRf.show()
-
-    val evaluatorRF = new MulticlassClassificationEvaluator()
-      .setLabelCol("label")
-      .setPredictionCol("prediction")
-      .setMetricName("accuracy")
-    val accuracyRF = evaluatorRF.evaluate(predictRf)
-
-    println(s"Randonm Forest accuracy = $accuracyRF")
+    val accuracyRF = classificationAccuracyMCE(predictRf)
 
     //Realización de perceptron, Artificial neural network
     val layers = Array[Int](8, 5, 4, 2)
@@ -333,20 +282,24 @@ object Main_Titanic {
       .setSeed(1234L)
       .setMaxIter(100)
 
-    val pipeP = new Pipeline().setStages(Array(labelIndexer, assembler, trainer))
+    val pipeP = new Pipeline().setStages(Array(labelIndexer,assembler,trainer))
 
-    val modelP = pipeP.fit(trainingData)
+    val predictP = classification(pipeP,trainingData,testData)
 
-    val predictP = modelP.transform(testData)
+    val accuracyP = classificationAccuracyMCE(predictP)
 
-    predictP.show()
+    //Realizacion de Gradient Boost Tree
+    val gbt = new GBTClassifier()
+      .setLabelCol("label")
+      .setFeaturesCol("features")
+      .setMaxIter(10)
+      .setFeatureSubsetStrategy("auto")
 
-    val evaluatorP = new MulticlassClassificationEvaluator()
-      .setMetricName("accuracy")
+    val pipeGbt = new Pipeline().setStages(Array(labelIndexer, assembler, gbt))
 
-    val accuracyP = evaluatorP.evaluate(predictP)
+    val predictGbt = classification(pipeGbt,trainingData,testData)
 
-    println(s"Perceptron accuracy = $accuracyP")
+    val accuracyGbt = classificationAccuracyMCE (predictGbt)
 
     val accSchema = StructType(List(
       StructField("Model", StringType, nullable = true),
@@ -359,11 +312,49 @@ object Main_Titanic {
       Row("Naive Bayes" , accuracyNB),
       Row("Decision Tree" , accuracyDT),
       Row("Random Forest" , accuracyRF),
+      Row("Gradient Boost Tree" , accuracyGbt),
       Row("Perceptron", accuracyP)
     ))
 
     val accuracyDf = sqlContext.createDataFrame(accrdd, accSchema)
 
     accuracyDf.orderBy(desc("Score")).show()
+  }
+
+  def classification (a: Pipeline, trainD: DataFrame, testD: DataFrame): DataFrame ={
+    val model = a.fit(trainD)
+
+    val predict = model.transform(testD)
+
+    predict.show()
+
+    return predict
+  }
+
+  def classificationAccuracyMCE (dat: DataFrame): Double ={
+    val evaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol("label")
+      .setPredictionCol("prediction")
+      .setMetricName("accuracy")
+    val accuracy = evaluator.evaluate(dat)
+
+    println(s"Acurracy from previous dataframe = $accuracy")
+    println(s"Test Error = ${(1.0 - accuracy)}")
+
+    return accuracy
+  }
+
+  def classificationAccuracyBCE (dat: DataFrame): Double ={
+    val evaluator = new BinaryClassificationEvaluator()
+      .setLabelCol("label")
+      .setRawPredictionCol("rawPrediction")
+      .setMetricName("areaUnderROC")
+
+    val accuracy = evaluator.evaluate(dat)
+
+    println(s"Acurracy from previous dataframe = $accuracy")
+    println(s"Test Error = ${(1.0 - accuracy)}")
+
+    return accuracy
   }
 }
