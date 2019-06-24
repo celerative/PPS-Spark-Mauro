@@ -1,4 +1,3 @@
-//imṕortar librerias para machine learning
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types.{FloatType, IntegerType, StringType, StructField, StructType, DoubleType}
 import org.apache.spark.sql.functions._
@@ -131,6 +130,8 @@ object Main_Titanic {
     //Se realiza una tabla mostrando la media de sobrevivientes para cada tipo de title
     //datasetDF.select("Title", "Survived").groupBy("Title").agg(avg("Survived")).orderBy(desc("avg(Survived)")).show()
 
+    /*
+    //Indexado a traves de un mapeo de string a int
     val title_index: (String => Int) = {
       case "Mr" => 1
       case "Miss" => 2
@@ -151,26 +152,18 @@ object Main_Titanic {
     val datasetDFIndexT = datasetDFReplace.withColumn("Title",title_indexUDF(datasetDFReplace.col("Title")))
     val datasetDFIndexS = datasetDFIndexT.withColumn("Sex",sexUDF(datasetDFIndexT.col("Sex")))
     val datasetDFTestIndexT = datasetDFTestReplace.withColumn("Title",title_indexUDF(datasetDFTestReplace.col("Title")))
-    val datasetDFTestIndexS = datasetDFTestIndexT.withColumn("Sex",sexUDF(datasetDFTestIndexT.col("Sex")))
+    val datasetDFTestIndexS = datasetDFTestIndexT.withColumn("Sex",sexUDF(datasetDFTestIndexT.col("Sex")))*/
     //datasetDF.show()
     //datasetDF.printSchema()
 
-   /* val age: (Float => Int) = (x:Float) => {
-      case (x <=16) => 0
-      case ((x>16)and(x<=32)) => 1
-      case ((x>32)and(x<=48)) => 2
-      case ((x>48)and(x<=64)) => 3
-      case (x>64) => 4
-    }
-    val ageUDF = udf(age_)*/
 
-    val datasetDFIndexA = datasetDFIndexS.withColumn("Age",when(expr("Age <= 16"),0)
+    val datasetDFIndexA = datasetDFReplace.withColumn("Age",when(expr("Age <= 16"),0)
       .when(expr("Age > 16 and Age <=32"),1)
       .when(expr("Age > 32 and Age <=48"),2)
       .when(expr("Age > 48 and Age <=64"),3).otherwise(4))
     //datasetDF = datasetDF.withColumn("Age", ageUDF(datasetDF.col("Age")))
 
-    val datasetDFTestIndexA = datasetDFTestIndexS.withColumn("Age",when(expr("Age <= 16"),0)
+    val datasetDFTestIndexA = datasetDFTestReplace.withColumn("Age",when(expr("Age <= 16"),0)
       .when(expr("Age > 16 and Age <=32"),1)
       .when(expr("Age > 32 and Age <=48"),2)
       .when(expr("Age > 48 and Age <=64"),3).otherwise(4))
@@ -189,37 +182,49 @@ object Main_Titanic {
     val datasetDFTestDrop2 = datasetDFTestAlone.drop("Parch","SibSp","FamilySize")
     val datasetDFTestAC = datasetDFTestDrop2.withColumn("Age*Class",col("Age")*col("Pclass"))
 
-    val embarked: (String => Int) = {
+    /*val embarked: (String => Int) = {
       case "C" => 1
       case "S" => 0
       case "Q" => 2
     }
     val embarkedUDF = udf(embarked)
 
-    val datasetDFIndexE = datasetDFAC.withColumn("Embarked",embarkedUDF(datasetDFAC.col("Embarked")))
-    val dataTrain = datasetDFIndexE.withColumn("Fare",when(expr("Fare <= 7.91"),0)
+    val datasetDFIndexE = datasetDFAC.withColumn("Embarked",embarkedUDF(datasetDFAC.col("Embarked")))*/
+    val embarkedIndexer = new StringIndexer().setInputCol("Embarked").setOutputCol("Embarked_indexed")
+    val titleIndexer = new StringIndexer().setInputCol("Title").setOutputCol("Title_indexed")
+    val sexIndexer = new StringIndexer().setInputCol("Sex").setOutputCol("Sex_indexed")
+    val dataTrain = datasetDFAC.withColumn("Fare",when(expr("Fare <= 7.91"),0)
       .when(expr("Fare > 7.91 and Fare <= 14.454"),1)
       .when(expr("Fare > 14.454 and Fare <= 31"),2)
       .otherwise(3))
 
-    val datasetDFTestIndexE = datasetDFTestAC.withColumn("Embarked",embarkedUDF(datasetDFTestAC.col("Embarked")))
-    val dataTestt = datasetDFTestIndexE.withColumn("Fare",when(expr("Fare <= 7.91"),0)
+    //val datasetDFTestIndexE = datasetDFTestAC.withColumn("Embarked",embarkedUDF(datasetDFTestAC.col("Embarked")))
+
+    val dataTestt = datasetDFTestAC.withColumn("Fare",when(expr("Fare <= 7.91"),0)
       .when(expr("Fare > 7.91 and Fare <= 14.454"),1)
       .when(expr("Fare > 14.454 and Fare <= 31"),2)
       .otherwise(3))
 
-    //dataTrain.show()
+    val pipeline = new Pipeline().setStages(Array(embarkedIndexer,titleIndexer,sexIndexer))
+    val model = pipeline.fit(dataTrain)
+    val trainingData= model.transform(dataTrain).drop("Sex","Title","Embarked")
+    //trainingData.show()
 
-    //val testData = dataTestt.drop("PassengerId").withColumn("Survived", lit(0))
 
-    val Array(trainingData, testData) = dataTrain.randomSplit(Array(0.8, 0.2))
+    val pipelineTest = new Pipeline().setStages(Array(embarkedIndexer,titleIndexer,sexIndexer))
+    val modelTest = pipelineTest.fit(dataTestt)
+    val testData= modelTest.transform(dataTestt).drop("Sex","Title","Embarked","PassengerId").withColumn("Survived",lit(0))
+
+    //testData.show()
+
+    //val Array(trainingData, testData) = dataTrain.randomSplit(Array(0.8, 0.2))
+
     //Declaracion de columnas con las caracteristicas a tener en cuenta para entrenar el dataframe
-    val featureCols = Array( "Pclass","Sex", "Age", "Fare", "Embarked", "Title", "Alone","Age*Class" )
+    val featureCols = Array( "Pclass","Sex_indexed", "Age", "Fare", "Embarked_indexed", "Title_indexed", "Alone","Age*Class" )
     val assembler = new VectorAssembler().setInputCols(featureCols).setOutputCol("features")
 
     //Declaracion de la feature a entrenar, designandola como label
     val labelIndexer = new StringIndexer().setInputCol("Survived").setOutputCol("label")
-    //val labelIndexerT= new StringIndexer().setInputCol("Sex").setOutputCol("label").fit(dataTest)
 
     //Realización de regresión lógica
     val lr = new LogisticRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
@@ -256,6 +261,7 @@ object Main_Titanic {
 
     val pipeDt = new Pipeline()
       .setStages(Array(labelIndexer, assembler, dt))
+
 
     val predictDt = classification(pipeDt,trainingData,testData)
 
