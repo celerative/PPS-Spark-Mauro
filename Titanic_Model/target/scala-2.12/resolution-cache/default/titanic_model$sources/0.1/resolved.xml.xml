@@ -4,7 +4,7 @@
 		module="titanic_model$sources"
 		revision="0.1"
 		status="integration"
-		publication="20190624113753"
+		publication="20190701134758"
 	/>
 	<configurations>
 		<conf name="compile" visibility="public" description=""/>
