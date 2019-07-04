@@ -336,6 +336,8 @@ object Main_Titanic {
 
     //val accuracyGbt = classificationAccuracyMCE(predictGbt)
     val accuracyGbt = classification(pipeGbt,trainingData,testData,paramGridGbt)
+
+    //Construcción de dataframe que contiene el accuracy de cada uno de los algoritmos de clasificación
     val accSchema = StructType(List(
       StructField("Model", StringType, nullable = true),
       StructField("Score", DoubleType, nullable = false)
@@ -356,6 +358,7 @@ object Main_Titanic {
     accuracyDf.orderBy(desc("Score")).show()
   }
 
+  // Funcion encargada de la clasificacion de los distintos algoritmos, con cross validation
   def classification (a: Pipeline, trainD: DataFrame, testD: DataFrame, p:Array[ParamMap]): Double ={
     val evaluator = new MulticlassClassificationEvaluator()
       .setLabelCol("label")
@@ -374,7 +377,6 @@ object Main_Titanic {
 
     predict.show()
 
-    //return predict
     val accuracy = evaluator.evaluate(predict)
 
     println(s"Acurracy from previous dataframe = $accuracy")
@@ -382,6 +384,7 @@ object Main_Titanic {
     return accuracy
   }
 
+  //Clasificación de los algoritmos
   def classificationV(a: Pipeline, trainD: DataFrame, testD: DataFrame): DataFrame={
     val model = a.fit(trainD)
     val predict = model.transform(testD)
@@ -390,6 +393,8 @@ object Main_Titanic {
 
     return predict
   }
+
+  //Función para obtención de accuracy para el dataframe especficado a traves de un mutliclass
   def classificationAccuracyMCE (dat: DataFrame): Double ={
     val evaluator = new MulticlassClassificationEvaluator()
       .setLabelCol("label")
@@ -403,6 +408,7 @@ object Main_Titanic {
     return accuracy
   }
 
+  //Función para obtención de accuracy para el dataframe especficado a traves de una clasificación binaria
   def classificationAccuracyBCE (dat: DataFrame): Double ={
     val evaluator = new BinaryClassificationEvaluator()
       .setLabelCol("label")
